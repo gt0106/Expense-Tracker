@@ -1,6 +1,7 @@
 // verifies the JWT.
 // only logged-in users can access GET /api/expenses
 
+
 const jwt = require("jsonwebtoken");
 
 const protect = (req, res, next) => {
