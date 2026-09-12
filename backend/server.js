@@ -23,11 +23,15 @@ app.use("/api/auth", authRoutes);
 const expenseRoutes = require("./routes/expenseRoutes");
 app.use("/api/expenses", expenseRoutes);
 
+const budgetRoutes = require("./routes/budgetRoutes");
+app.use("/api/budget", budgetRoutes);
+
+const analyticsRoutes = require("./routes/analyticsRoutes");
+app.use("/api/analytics", analyticsRoutes);
+
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-const budgetRoutes = require("./routes/budgetRoutes");
-app.use("/api/budget", budgetRoutes);
