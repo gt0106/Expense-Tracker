@@ -10,6 +10,14 @@ import {
 type Page = "login" | "register" | "dashboard" | "expenses" | "budget" | "reports";
 interface Expense { id: number; date: string; title: string; category: string; amount: number; }
 interface Budget  { month: string; amount: number; }
+interface UserProfile { name: string; email: string; }
+
+function getInitials(name?: string): string {
+  if (!name || !name.trim()) return "U";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
 const INIT_EXPENSES: Expense[] = [
@@ -276,10 +284,12 @@ const NAV_ITEMS = [
   { id:"reports"   as Page, label:"Reports",   icon:<BarChart3 size={18}/> },
 ];
 
-function Sidebar({ dk, page, setPage, onLogout, open, setOpen }: {
+function Sidebar({ dk, page, setPage, onLogout, open, setOpen, user }: {
   dk:boolean; page:Page; setPage:(p:Page)=>void; onLogout:()=>void; open:boolean; setOpen:(v:boolean)=>void;
+  user: UserProfile;
 }) {
   const s = T[dk?"dark":"light"];
+  const initials = getInitials(user.name);
   const content = (
     <div style={{ display:"flex", flexDirection:"column", height:"100%", background:s.sidebar, borderRight:`1px solid ${s.border}` }}>
       <div style={{ display:"flex", alignItems:"center", gap:10, padding:"0 20px", height:64, borderBottom:`1px solid ${s.border}` }}>
@@ -303,10 +313,19 @@ function Sidebar({ dk, page, setPage, onLogout, open, setOpen }: {
           );
         })}
       </nav>
-      <div style={{ padding:"14px 12px", borderTop:`1px solid ${s.border}` }}>
+      <div style={{ padding:"12px 14px", borderTop:`1px solid ${s.border}` }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, padding:"6px 8px", borderRadius:10, background:s.row }}>
+          <div style={{ width:32, height:32, borderRadius:99, background:"#2563EB", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:12, fontWeight:800, flexShrink:0 }}>
+            {initials}
+          </div>
+          <div style={{ minWidth:0, flex:1 }}>
+            <p style={{ fontSize:13, fontWeight:700, color:s.text, margin:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.name}</p>
+            <p style={{ fontSize:11, color:s.sub, margin:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.email}</p>
+          </div>
+        </div>
         <button onClick={onLogout}
-          style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"10px 12px",
-            borderRadius:12, border:"none", cursor:"pointer", fontSize:14, fontWeight:600,
+          style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"8px 12px",
+            borderRadius:10, border:"none", cursor:"pointer", fontSize:13, fontWeight:600,
             background:"transparent", color:"#DC2626" }}>
           <LogOut size={16}/> Logout
         </button>
@@ -332,26 +351,43 @@ function Sidebar({ dk, page, setPage, onLogout, open, setOpen }: {
 }
 
 // ─── Profile Modal ────────────────────────────────────────────────────────────
-function ProfileModal({ dk, onClose }: { dk:boolean; onClose:()=>void }) {
+function ProfileModal({ dk, user, onSave, onClose }: {
+  dk:boolean; user:UserProfile; onSave:(u:UserProfile)=>void; onClose:()=>void;
+}) {
   const s = T[dk?"dark":"light"];
-  const [name,  setName]  = useState("Alex Morgan");
-  const [email, setEmail] = useState("alex@example.com");
+  const [name,  setName]  = useState(user.name);
+  const [email, setEmail] = useState(user.email);
   const [saved, setSaved] = useState(false);
-  function save() { setSaved(true); setTimeout(()=>setSaved(false), 2000); }
+
+  function save() {
+    if (!name.trim()) return;
+    const updated: UserProfile = { name: name.trim(), email: email.trim() || user.email };
+    onSave(updated);
+    setSaved(true);
+    setTimeout(() => {
+      setSaved(false);
+      onClose();
+    }, 800);
+  }
+
+  const initials = getInitials(name || user.name);
+
   return (
     <Modal dk={dk} title="My Profile" onClose={onClose}>
       <div style={{ display:"flex", flexDirection:"column", alignItems:"center", marginBottom:24 }}>
-        <div style={{ width:64, height:64, borderRadius:99, background:"#2563EB", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:22, fontWeight:800, marginBottom:12 }}>AM</div>
-        <p style={{ fontWeight:700, color:s.text }}>{name}</p>
-        <p style={{ fontSize:13, color:s.sub }}>{email}</p>
+        <div style={{ width:64, height:64, borderRadius:99, background:"#2563EB", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:22, fontWeight:800, marginBottom:12 }}>
+          {initials}
+        </div>
+        <p style={{ fontWeight:700, color:s.text, fontSize:16, margin:"0 0 2px" }}>{name || "Your Name"}</p>
+        <p style={{ fontSize:13, color:s.sub, margin:0 }}>{email || "your@email.com"}</p>
       </div>
       <div style={{ marginBottom:14 }}>
         <label style={{ display:"block", fontSize:13, fontWeight:600, color:s.sub, marginBottom:6 }}>Full Name</label>
-        <input value={name} onChange={e=>setName(e.target.value)} style={inputStyle(dk)}/>
+        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Enter full name" style={inputStyle(dk)}/>
       </div>
       <div style={{ marginBottom:20 }}>
         <label style={{ display:"block", fontSize:13, fontWeight:600, color:s.sub, marginBottom:6 }}>Email</label>
-        <input value={email} onChange={e=>setEmail(e.target.value)} style={inputStyle(dk)}/>
+        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Enter email" style={inputStyle(dk)}/>
       </div>
       <div style={{ display:"flex", gap:10 }}>
         <button onClick={onClose} style={{ ...ghostBtn(dk), flex:1, justifyContent:"center" }}>Cancel</button>
@@ -418,10 +454,12 @@ function SettingsModal({ dk, setDk, currency, setCurrency, onClose }: {
 }
 
 // ─── Navbar ───────────────────────────────────────────────────────────────────
-function Navbar({ dk, setDk, page, onMenuToggle, onLogout, currency, setCurrency }: {
+function Navbar({ dk, setDk, page, onMenuToggle, onLogout, currency, setCurrency, user, onUpdateUser, addToast }: {
   dk:boolean; setDk:(v:boolean)=>void; page:Page;
   onMenuToggle:()=>void; onLogout:()=>void;
   currency:string; setCurrency:(v:string)=>void;
+  user: UserProfile; onUpdateUser:(u:UserProfile)=>void;
+  addToast:(m:string, t:"success"|"error")=>void;
 }) {
   const s = T[dk?"dark":"light"];
   const [showNotif,    setShowNotif]    = useState(false);
@@ -437,6 +475,9 @@ function Navbar({ dk, setDk, page, onMenuToggle, onLogout, currency, setCurrency
   ];
 
   function closeAll() { setShowNotif(false); setShowUser(false); }
+
+  const initials = getInitials(user.name);
+  const firstName = user.name.trim().split(/\s+/)[0] || user.name;
 
   return (
     <>
@@ -480,16 +521,18 @@ function Navbar({ dk, setDk, page, onMenuToggle, onLogout, currency, setCurrency
         <div style={{ position:"relative", zIndex:31 }}>
           <button onClick={()=>{ setShowUser(v=>!v); setShowNotif(false); }}
             style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 10px", borderRadius:10, border:`1px solid ${s.border}`, background:s.card, cursor:"pointer" }}>
-            <div style={{ width:30, height:30, borderRadius:99, background:"#2563EB", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:11, fontWeight:800 }}>AM</div>
-            <span style={{ fontSize:13, fontWeight:600, color:s.text }}>Alex</span>
+            <div style={{ width:30, height:30, borderRadius:99, background:"#2563EB", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:11, fontWeight:800 }}>
+              {initials}
+            </div>
+            <span style={{ fontSize:13, fontWeight:600, color:s.text }}>{firstName}</span>
             <ChevronDown size={13} color={s.sub}/>
           </button>
           {showUser && (
-            <div style={{ position:"absolute", top:48, right:0, width:190, ...card(dk), boxShadow:"0 12px 40px rgba(0,0,0,0.2)", zIndex:99, padding:6 }}>
+            <div style={{ position:"absolute", top:48, right:0, width:200, ...card(dk), boxShadow:"0 12px 40px rgba(0,0,0,0.2)", zIndex:99, padding:6 }}>
               {/* User info header */}
               <div style={{ padding:"10px 12px 12px", borderBottom:`1px solid ${s.border}`, marginBottom:4 }}>
-                <p style={{ fontSize:13, fontWeight:700, color:s.text }}>Alex Morgan</p>
-                <p style={{ fontSize:11, color:s.sub }}>alex@example.com</p>
+                <p style={{ fontSize:13, fontWeight:700, color:s.text, margin:"0 0 2px" }}>{user.name}</p>
+                <p style={{ fontSize:11, color:s.sub, margin:0, wordBreak:"break-all" }}>{user.email}</p>
               </div>
               <button onClick={()=>{ setShowUser(false); setShowProfile(true); }}
                 style={{ width:"100%", display:"flex", alignItems:"center", gap:8, padding:"9px 12px", border:"none", background:"none", cursor:"pointer", borderRadius:8, color:s.text, fontSize:13, fontWeight:500 }}>
@@ -510,17 +553,28 @@ function Navbar({ dk, setDk, page, onMenuToggle, onLogout, currency, setCurrency
         </div>
       </div>
     </header>
-    {showProfile  && <ProfileModal  dk={dk} onClose={()=>setShowProfile(false)}/>}
+    {showProfile  && (
+      <ProfileModal
+        dk={dk}
+        user={user}
+        onSave={(u) => {
+          onUpdateUser(u);
+          addToast("Profile updated successfully!", "success");
+        }}
+        onClose={()=>setShowProfile(false)}
+      />
+    )}
     {showSettings && <SettingsModal dk={dk} setDk={setDk} currency={currency} setCurrency={setCurrency} onClose={()=>setShowSettings(false)}/>}
     </>
   );
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt }: {
+function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt, user }: {
   dk:boolean; expenses:Expense[]; budget:Budget; setBudget:(b:Budget)=>void;
   setPage:(p:Page)=>void; addToast:(m:string,t:"success"|"error")=>void;
   fmt:(n:number)=>string;
+  user: UserProfile;
 }) {
   const [showAdd, setShowAdd] = useState(false);
   const [allExpenses, setAllExpenses] = useState(expenses);
@@ -555,8 +609,25 @@ function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt
     { label:"Top Category",   value:topCat,               sub:fmt(monthExp.filter(e=>e.category===topCat).reduce((s,e)=>s+e.amount,0))+" spent", icon:<Tag size={18}/>, color:"#EA580C" },
   ];
 
+  const firstName = user.name.trim().split(/\s+/)[0] || user.name;
+
   return (
     <div style={{ padding:24, maxWidth:1200, margin:"0 auto" }}>
+      {/* Welcome banner */}
+      <div style={{ marginBottom:22, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
+        <div>
+          <h2 style={{ fontSize:22, fontWeight:800, color:s.text, margin:"0 0 4px" }}>
+            Welcome back, {firstName}! 👋
+          </h2>
+          <p style={{ fontSize:13, color:s.sub, margin:0 }}>
+            Here is a snapshot of your spending and budget for {budget.month}.
+          </p>
+        </div>
+        <button onClick={()=>setShowAdd(true)} style={{ ...btn("#2563EB"), padding:"10px 16px" }}>
+          <Plus size={16}/> Add Expense
+        </button>
+      </div>
+
       {/* Cards */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:16, marginBottom:20 }}>
         {summaryCards.map(c=>(
@@ -994,16 +1065,21 @@ function ReportsPage({ dk, expenses, fmt }: { dk:boolean; expenses:Expense[]; fm
 }
 
 // ─── Auth pages ───────────────────────────────────────────────────────────────
-function AuthPage({ mode, setPage }: { mode:"login"|"register"; setPage:(p:Page)=>void }) {
+function AuthPage({ mode, setPage, onAuthSuccess }: {
+  mode:"login"|"register";
+  setPage:(p:Page)=>void;
+  onAuthSuccess:(u:UserProfile)=>void;
+}) {
   const [name, setName]         = useState("");
   const [email, setEmail]       = useState("demo@example.com");
   const [password, setPassword] = useState("password");
   const [confirm, setConfirm]   = useState("");
   const [showPw, setShowPw]     = useState(false);
+  const [loading, setLoading]   = useState(false);
   const [errors, setErrors]     = useState<Record<string,string>>({});
   const isLogin = mode==="login";
 
-  function submit(ev: React.FormEvent) {
+  async function submit(ev: React.FormEvent) {
     ev.preventDefault();
     const e: Record<string,string> = {};
     if (!isLogin && !name.trim()) e.name = "Name required";
@@ -1012,6 +1088,56 @@ function AuthPage({ mode, setPage }: { mode:"login"|"register"; setPage:(p:Page)
     if (!isLogin && confirm!==password) e.confirm = "Passwords do not match";
     setErrors(e);
     if (Object.keys(e).length) return;
+
+    setLoading(true);
+
+    const fallbackName = !isLogin
+      ? name.trim()
+      : (name.trim() || email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, l => l.toUpperCase()) || "User");
+
+    // Try backend authentication
+    try {
+      const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
+      const body = isLogin
+        ? { email: email.trim(), password }
+        : { name: name.trim(), email: email.trim(), password };
+
+      const res = await fetch(`http://localhost:5000${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const profileUser = {
+          name: data.user?.name || fallbackName,
+          email: data.user?.email || email.trim(),
+        };
+        if (data.token) {
+          try { localStorage.setItem("expense_tracker_token", data.token); } catch {}
+        }
+        onAuthSuccess(profileUser);
+        setPage("dashboard");
+        setLoading(false);
+        return;
+      } else {
+        const data = await res.json().catch(() => ({}));
+        if (data.message) {
+          setErrors({ form: data.message });
+          setLoading(false);
+          return;
+        }
+      }
+    } catch {
+      // Backend not running or offline, proceed with local profile
+    }
+
+    setLoading(false);
+    onAuthSuccess({
+      name: fallbackName,
+      email: email.trim(),
+    });
     setPage("dashboard");
   }
 
@@ -1034,6 +1160,11 @@ function AuthPage({ mode, setPage }: { mode:"login"|"register"; setPage:(p:Page)
           <p style={{ fontSize:14, color:"#6B7280" }}>{isLogin?"Welcome back! Please sign in.":"Start tracking your expenses today."}</p>
         </div>
         <div style={{ background:"#fff", borderRadius:20, boxShadow:"0 8px 40px rgba(0,0,0,.1)", border:"1px solid #E5E7EB", padding:28 }}>
+          {errors.form && (
+            <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"10px 12px", marginBottom:16, color:"#DC2626", fontSize:13, display:"flex", alignItems:"center", gap:8 }}>
+              <AlertTriangle size={15}/> {errors.form}
+            </div>
+          )}
           <form onSubmit={submit}>
             {!isLogin && field("name","Full Name",
               <input value={name} onChange={e=>setName(e.target.value)} placeholder="Alex Morgan" style={{ ...inputStyle(false), border:`1px solid ${errors.name?"#DC2626":"#E5E7EB"}` }}/>
@@ -1060,8 +1191,8 @@ function AuthPage({ mode, setPage }: { mode:"login"|"register"; setPage:(p:Page)
                 <button type="button" style={{ background:"none", border:"none", cursor:"pointer", color:"#2563EB", fontSize:13, fontWeight:600 }}>Forgot password?</button>
               </div>
             )}
-            <button type="submit" style={{ ...btn("#2563EB"), width:"100%", justifyContent:"center", padding:"12px", fontSize:15 }}>
-              {isLogin ? "Sign In" : "Create Account"}
+            <button type="submit" disabled={loading} style={{ ...btn("#2563EB"), width:"100%", justifyContent:"center", padding:"12px", fontSize:15, opacity: loading ? 0.7 : 1 }}>
+              {loading ? "Please wait..." : isLogin ? "Sign In" : "Create Account"}
             </button>
           </form>
           <p style={{ textAlign:"center", fontSize:13, color:"#6B7280", marginTop:20 }}>
@@ -1087,6 +1218,43 @@ export default function App() {
   const [mobileOpen,setMobile]  = useState(false);
   const [toast,    setToast]    = useState<{msg:string;type:"success"|"error"}|null>(null);
 
+  const [user, setUser] = useState<UserProfile>(() => {
+    try {
+      const saved = localStorage.getItem("expense_tracker_user");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return { name: "Alex Morgan", email: "alex@example.com" };
+  });
+
+  const handleUpdateUser = async (updated: UserProfile) => {
+    setUser(updated);
+    try {
+      localStorage.setItem("expense_tracker_user", JSON.stringify(updated));
+    } catch {}
+
+    // Sync to backend if token exists
+    try {
+      const token = localStorage.getItem("expense_tracker_token");
+      if (token) {
+        await fetch("http://localhost:5000/api/auth/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify(updated),
+        });
+      }
+    } catch {
+      // Ignore network errors when syncing to backend
+    }
+  };
+
+  const handleAuthSuccess = (u: UserProfile) => {
+    handleUpdateUser(u);
+    addToast(`Welcome, ${u.name}!`, "success");
+  };
+
   const fmt = useMemo(() => makeFmt(currency), [currency]);
 
   function addToast(msg:string, type:"success"|"error") {
@@ -1103,7 +1271,7 @@ export default function App() {
     return (
       <>
         <style>{`*{box-sizing:border-box;margin:0;padding:0;font-family:Inter,system-ui,sans-serif}`}</style>
-        <AuthPage mode={page as "login"|"register"} setPage={setPage}/>
+        <AuthPage mode={page as "login"|"register"} setPage={setPage} onAuthSuccess={handleAuthSuccess}/>
       </>
     );
   }
@@ -1125,11 +1293,11 @@ export default function App() {
         }
       `}</style>
       <div style={{ display:"flex", height:"100vh", overflow:"hidden", background:s.bg }}>
-        <Sidebar dk={dk} page={page} setPage={setPage} onLogout={logout} open={mobileOpen} setOpen={setMobile}/>
+        <Sidebar dk={dk} page={page} setPage={setPage} onLogout={logout} open={mobileOpen} setOpen={setMobile} user={user}/>
         <div style={{ flex:1, display:"flex", flexDirection:"column", minWidth:0, overflow:"hidden" }}>
-          <Navbar dk={dk} setDk={setDk} page={page} onMenuToggle={()=>setMobile(v=>!v)} onLogout={logout} currency={currency} setCurrency={setCurrency}/>
+          <Navbar dk={dk} setDk={setDk} page={page} onMenuToggle={()=>setMobile(v=>!v)} onLogout={logout} currency={currency} setCurrency={setCurrency} user={user} onUpdateUser={handleUpdateUser} addToast={addToast}/>
           <div style={{ flex:1, overflowY:"auto" }}>
-            {page==="dashboard" && <DashboardPage dk={dk} expenses={expenses} budget={budget} setBudget={setBudget} setPage={setPage} addToast={addToast} fmt={fmt}/>}
+            {page==="dashboard" && <DashboardPage dk={dk} expenses={expenses} budget={budget} setBudget={setBudget} setPage={setPage} addToast={addToast} fmt={fmt} user={user}/>}
             {page==="expenses"  && <ExpensesPage  dk={dk} expenses={expenses} setExpenses={setExpenses} addToast={addToast} fmt={fmt}/>}
             {page==="budget"    && <BudgetPage    dk={dk} expenses={expenses} budget={budget} setBudget={setBudget} addToast={addToast} fmt={fmt}/>}
             {page==="reports"   && <ReportsPage   dk={dk} expenses={expenses} fmt={fmt}/>}
