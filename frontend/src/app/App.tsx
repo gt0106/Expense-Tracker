@@ -5,6 +5,7 @@ import {
   Sun, Moon, LogOut, Edit2, Trash2, X, Check, Search, Menu,
   Lightbulb, User, Settings, Eye, EyeOff, ChevronRight,
 } from "lucide-react";
+import { loginUser, registerUser } from "../services/auth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Page = "login" | "register" | "dashboard" | "expenses" | "budget" | "reports";
@@ -1091,54 +1092,45 @@ function AuthPage({ mode, setPage, onAuthSuccess }: {
 
     setLoading(true);
 
-    const fallbackName = !isLogin
-      ? name.trim()
-      : (name.trim() || email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, l => l.toUpperCase()) || "User");
-
-    // Try backend authentication
     try {
-      const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
-      const body = isLogin
-        ? { email: email.trim(), password }
-        : { name: name.trim(), email: email.trim(), password };
+      if (isLogin) {
+        // Call existing backend login API service (POST http://localhost:5000/api/auth/login)
+        const data = await loginUser(email.trim(), password);
 
-      const res = await fetch(`http://localhost:5000${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+        // Save JWT token using the required key
+        localStorage.setItem("token", data.token);
 
-      if (res.ok) {
-        const data = await res.json();
-        const profileUser = {
-          name: data.user?.name || fallbackName,
-          email: data.user?.email || email.trim(),
-        };
-        if (data.token) {
-          try { localStorage.setItem("expense_tracker_token", data.token); } catch {}
+        // Save logged-in user information
+        if (data.user) {
+          localStorage.setItem("expense_tracker_user", JSON.stringify(data.user));
+          onAuthSuccess(data.user);
         }
-        onAuthSuccess(profileUser);
+
         setPage("dashboard");
-        setLoading(false);
-        return;
       } else {
-        const data = await res.json().catch(() => ({}));
-        if (data.message) {
-          setErrors({ form: data.message });
-          setLoading(false);
-          return;
-        }
-      }
-    } catch {
-      // Backend not running or offline, proceed with local profile
-    }
+        // Registration API service call
+        const data = await registerUser(name.trim(), email.trim(), password);
 
-    setLoading(false);
-    onAuthSuccess({
-      name: fallbackName,
-      email: email.trim(),
-    });
-    setPage("dashboard");
+        if (data.token) {
+          localStorage.setItem("token", data.token);
+        }
+
+        if (data.user) {
+          localStorage.setItem("expense_tracker_user", JSON.stringify(data.user));
+          onAuthSuccess(data.user);
+        }
+
+        setPage("dashboard");
+      }
+    } catch (err: any) {
+      const errorMsg =
+        err.response?.data?.message ||
+        err.message ||
+        "Authentication failed. Please check your credentials.";
+      setErrors({ form: errorMsg });
+    } finally {
+      setLoading(false);
+    }
   }
 
   const field = (id:string, lbl:string, node:React.ReactNode) => (
@@ -1234,7 +1226,7 @@ export default function App() {
 
     // Sync to backend if token exists
     try {
-      const token = localStorage.getItem("expense_tracker_token");
+      const token = localStorage.getItem("token");
       if (token) {
         await fetch("http://localhost:5000/api/auth/profile", {
           method: "PUT",
@@ -1262,7 +1254,11 @@ export default function App() {
     setTimeout(()=>setToast(null), 3000);
   }
 
-  function logout() { setPage("login"); setMobile(false); }
+  function logout() {
+    localStorage.removeItem("token");
+    setPage("login");
+    setMobile(false);
+  }
 
   const s = T[dk?"dark":"light"];
   const authed = page!=="login" && page!=="register";
