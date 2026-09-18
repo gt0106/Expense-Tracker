@@ -1143,7 +1143,7 @@ function AuthPage({ mode, setPage, onAuthSuccess }: {
 
     try {
       if (isLogin) {
-        // Call existing backend login API service (POST http://localhost:5000/api/auth/login)
+        // Call existing backend login API service (POST https://expense-tracker-backend-qgdw.onrender.com/api/auth/login)
         const data = await loginUser(email.trim(), password);
 
         // Save JWT token using the required key
