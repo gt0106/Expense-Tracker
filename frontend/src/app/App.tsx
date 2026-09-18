@@ -56,6 +56,10 @@ function makeFmt(currency: string) {
   const { symbol, locale } = CURRENCY_MAP[currency] ?? CURRENCY_MAP["INR (₹)"];
   return (n: number) => symbol + Math.round(n).toLocaleString(locale);
 }
+function getApiErrorMessage(error: unknown, fallback = "Something went wrong") {
+  const responseMessage = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+  return responseMessage || fallback;
+}
 const fmtDate = (s: string) => new Date(s.length === 10 ? `${s}T00:00:00` : s).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"});
 const currentPeriod = () => {
   const now = new Date();
@@ -576,6 +580,7 @@ function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt
 }) {
   const [showAdd, setShowAdd] = useState(false);
   const [analytics, setAnalytics] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const s = T[dk?"dark":"light"];
   useEffect(() => {
     const loadAnalytics = async () => {
@@ -584,11 +589,18 @@ function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt
         setAnalytics(data);
       } catch (error) {
         console.error("Failed to load dashboard analytics:", error);
+        addToast(getApiErrorMessage(error, "Failed to load dashboard data"), "error");
+      } finally {
+        setLoading(false);
       }
     };
 
     loadAnalytics();
   }, []);
+
+  if (loading) {
+    return <div style={{ padding:24, color:s.sub }}>Loading...</div>;
+  }
 
   const spent = analytics?.totalSpent ?? 0;
   const monthlyBudget = analytics?.monthlyBudget ?? 0;
@@ -611,7 +623,7 @@ function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt
       addToast("Expense added!","success");
     } catch (error) {
       console.error("Failed to add expense:", error);
-      addToast("Could not add expense", "error");
+      addToast(getApiErrorMessage(error, "Could not add expense"), "error");
     }
   }
 
@@ -770,7 +782,7 @@ function ExpensesPage({ dk, expenses, setExpenses, addToast, fmt }: {
       setShowAdd(false); addToast("Expense added!","success");
     } catch (error) {
       console.error("Failed to add expense:", error);
-      addToast("Could not add expense", "error");
+      addToast(getApiErrorMessage(error, "Could not add expense"), "error");
     }
   }
   async function handleEdit(data: Omit<Expense,"_id">) {
@@ -780,7 +792,7 @@ function ExpensesPage({ dk, expenses, setExpenses, addToast, fmt }: {
       setEditing(null); addToast("Expense updated!","success");
     } catch (error) {
       console.error("Failed to update expense:", error);
-      addToast("Could not update expense", "error");
+      addToast(getApiErrorMessage(error, "Could not update expense"), "error");
     }
   }
   async function handleDelete() {
@@ -790,7 +802,7 @@ function ExpensesPage({ dk, expenses, setExpenses, addToast, fmt }: {
       setDeleting(null); addToast("Expense deleted","success");
     } catch (error) {
       console.error("Failed to delete expense:", error);
-      addToast("Could not delete expense", "error");
+      addToast(getApiErrorMessage(error, "Could not delete expense"), "error");
     }
   }
 
