@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LayoutDashboard, CreditCard, PiggyBank, BarChart3, Wallet,
   Bell, Plus, TrendingUp, Tag, Target, AlertTriangle, ChevronDown,
@@ -6,10 +6,12 @@ import {
   Lightbulb, User, Settings, Eye, EyeOff, ChevronRight,
 } from "lucide-react";
 import { loginUser, registerUser } from "../services/auth";
+import { addExpense, deleteExpense, getExpenses, updateExpense } from "../services/expenseService";
+import { createBudget, getBudget } from "../services/budgetService";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Page = "login" | "register" | "dashboard" | "expenses" | "budget" | "reports";
-interface Expense { id: number; date: string; title: string; category: string; amount: number; }
+interface Expense { _id: string; date: string; title: string; category: string; amount: number; }
 interface Budget  { month: string; amount: number; }
 interface UserProfile { name: string; email: string; }
 
@@ -21,19 +23,6 @@ function getInitials(name?: string): string {
 }
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
-const INIT_EXPENSES: Expense[] = [
-  { id: 1,  date: "2024-07-22", title: "Swiggy Order",      category: "Food & Dining",  amount: 480  },
-  { id: 2,  date: "2024-07-21", title: "Uber Ride",          category: "Transport",      amount: 220  },
-  { id: 3,  date: "2024-07-20", title: "Electricity Bill",   category: "Utilities",      amount: 1850 },
-  { id: 4,  date: "2024-07-19", title: "Amazon Shopping",    category: "Shopping",       amount: 1240 },
-  { id: 5,  date: "2024-07-18", title: "Movie Tickets",      category: "Entertainment",  amount: 560  },
-  { id: 6,  date: "2024-07-17", title: "Gym Membership",     category: "Healthcare",     amount: 999  },
-  { id: 7,  date: "2024-07-16", title: "Grocery Store",      category: "Food & Dining",  amount: 1150 },
-  { id: 8,  date: "2024-07-15", title: "Bus Pass",           category: "Transport",      amount: 300  },
-  { id: 9,  date: "2024-07-14", title: "Online Course",      category: "Education",      amount: 1999 },
-  { id: 10, date: "2024-07-13", title: "Restaurant Dinner",  category: "Food & Dining",  amount: 870  },
-];
-
 const CATEGORIES = ["Food & Dining","Transport","Housing","Healthcare","Entertainment","Shopping","Utilities","Education","Other"];
 
 const CAT_COLOR: Record<string,string> = {
@@ -67,7 +56,14 @@ function makeFmt(currency: string) {
   return (n: number) => symbol + Math.round(n).toLocaleString(locale);
 }
 const fmtDate = (s: string) => new Date(s + "T00:00:00").toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"});
-let nextId = 100;
+const currentPeriod = () => {
+  const now = new Date();
+  return {
+    month: now.getMonth() + 1,
+    year: now.getFullYear(),
+    label: now.toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
+  };
+};
 
 // ─── Theme tokens ─────────────────────────────────────────────────────────────
 const T = {
@@ -218,12 +214,12 @@ function Toast({ msg, type }: { msg:string; type:"success"|"error" }) {
 
 // ─── Expense Form ─────────────────────────────────────────────────────────────
 function ExpenseForm({ dk, initial, onSave, onClose }: {
-  dk:boolean; initial?:Expense; onSave:(e:Omit<Expense,"id">)=>void; onClose:()=>void;
+  dk:boolean; initial?:Expense; onSave:(e:Omit<Expense,"_id">)=>void; onClose:()=>void;
 }) {
   const [title, setTitle]       = useState(initial?.title ?? "");
   const [amount, setAmount]     = useState(initial?.amount?.toString() ?? "");
   const [category, setCategory] = useState(initial?.category ?? CATEGORIES[0]);
-  const [date, setDate]         = useState(initial?.date ?? "2024-07-22");
+  const [date, setDate]         = useState(initial?.date ?? new Date().toISOString().slice(0, 10));
   const [err, setErr]           = useState<Record<string,string>>({});
 
   function submit(ev: React.FormEvent) {
@@ -571,16 +567,15 @@ function Navbar({ dk, setDk, page, onMenuToggle, onLogout, currency, setCurrency
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt, user }: {
+function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt, onAddExpense, user }: {
   dk:boolean; expenses:Expense[]; budget:Budget; setBudget:(b:Budget)=>void;
   setPage:(p:Page)=>void; addToast:(m:string,t:"success"|"error")=>void;
-  fmt:(n:number)=>string;
+  fmt:(n:number)=>string; onAddExpense:(data:Omit<Expense,"_id">)=>Promise<void>;
   user: UserProfile;
 }) {
   const [showAdd, setShowAdd] = useState(false);
-  const [allExpenses, setAllExpenses] = useState(expenses);
   const s = T[dk?"dark":"light"];
-  const monthExp = allExpenses.filter(e=>e.date.startsWith("2024-07"));
+  const monthExp = expenses.filter(e=>e.date.startsWith(`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`));
   const spent    = monthExp.reduce((s,e)=>s+e.amount,0);
   const remaining = budget.amount - spent;
   const pct       = budget.amount>0 ? (spent/budget.amount)*100 : 0;
@@ -597,10 +592,15 @@ function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt
   })();
   const recent = [...monthExp].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
 
-  function handleAdd(data: Omit<Expense,"id">) {
-    setAllExpenses(es=>[{ id:++nextId, ...data }, ...es]);
-    setShowAdd(false);
-    addToast("Expense added!","success");
+  async function handleAdd(data: Omit<Expense,"_id">) {
+    try {
+      await onAddExpense(data);
+      setShowAdd(false);
+      addToast("Expense added!","success");
+    } catch (error) {
+      console.error("Failed to add expense:", error);
+      addToast("Could not add expense", "error");
+    }
   }
 
   const summaryCards = [
@@ -669,7 +669,7 @@ function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt
         </div>
         <div style={{ ...card(dk), padding:24 }}>
           <p style={{ fontWeight:700, color:s.text, marginBottom:2 }}>By Category</p>
-          <p style={{ fontSize:12, color:s.sub, marginBottom:12 }}>July 2024</p>
+          <p style={{ fontSize:12, color:s.sub, marginBottom:12 }}>{budget.month}</p>
           <div style={{ display:"flex", justifyContent:"center", marginBottom:14 }}>
             <DonutChart data={catData} dk={dk}/>
           </div>
@@ -707,7 +707,7 @@ function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt
           </thead>
           <tbody>
             {recent.map(e=>(
-              <tr key={e.id} style={{ borderBottom:`1px solid ${s.border}` }}>
+              <tr key={e._id} style={{ borderBottom:`1px solid ${s.border}` }}>
                 <td style={{ padding:"12px 0", fontSize:13, color:s.sub, whiteSpace:"nowrap" }}>{fmtDate(e.date)}</td>
                 <td style={{ padding:"12px 8px", fontSize:13, fontWeight:600, color:s.text }}>{e.title}</td>
                 <td style={{ padding:"12px 8px" }}>
@@ -751,17 +751,35 @@ function ExpensesPage({ dk, expenses, setExpenses, addToast, fmt }: {
       && (catF==="All" || e.category===catF);
   }),[expenses,search,catF]);
 
-  function handleAdd(data: Omit<Expense,"id">) {
-    setExpenses(es=>[{ id:++nextId, ...data },...es]);
-    setShowAdd(false); addToast("Expense added!","success");
+  async function handleAdd(data: Omit<Expense,"_id">) {
+    try {
+      const response = await addExpense(data);
+      setExpenses(es=>[{ ...(response.expense ?? response) },...es]);
+      setShowAdd(false); addToast("Expense added!","success");
+    } catch (error) {
+      console.error("Failed to add expense:", error);
+      addToast("Could not add expense", "error");
+    }
   }
-  function handleEdit(data: Omit<Expense,"id">) {
-    setExpenses(es=>es.map(e=>e.id===editing!.id?{...e,...data}:e));
-    setEditing(null); addToast("Expense updated!","success");
+  async function handleEdit(data: Omit<Expense,"_id">) {
+    try {
+      const response = await updateExpense(editing!._id, data);
+      setExpenses(es=>es.map(e=>e._id===editing!._id ? (response.expense ?? response) : e));
+      setEditing(null); addToast("Expense updated!","success");
+    } catch (error) {
+      console.error("Failed to update expense:", error);
+      addToast("Could not update expense", "error");
+    }
   }
-  function handleDelete() {
-    setExpenses(es=>es.filter(e=>e.id!==deleting!.id));
-    setDeleting(null); addToast("Expense deleted","success");
+  async function handleDelete() {
+    try {
+      await deleteExpense(deleting!._id);
+      setExpenses(es=>es.filter(e=>e._id!==deleting!._id));
+      setDeleting(null); addToast("Expense deleted","success");
+    } catch (error) {
+      console.error("Failed to delete expense:", error);
+      addToast("Could not delete expense", "error");
+    }
   }
 
   return (
@@ -803,7 +821,7 @@ function ExpensesPage({ dk, expenses, setExpenses, addToast, fmt }: {
             </thead>
             <tbody>
               {filtered.map(e=>(
-                <tr key={e.id} style={{ borderBottom:`1px solid ${s.border}` }}>
+                <tr key={e._id} style={{ borderBottom:`1px solid ${s.border}` }}>
                   <td style={{ padding:"12px 0", fontSize:13, color:s.sub, whiteSpace:"nowrap" }}>{fmtDate(e.date)}</td>
                   <td style={{ padding:"12px 8px", fontSize:13, fontWeight:600, color:s.text }}>{e.title}</td>
                   <td style={{ padding:"12px 8px" }}>
@@ -838,24 +856,31 @@ function ExpensesPage({ dk, expenses, setExpenses, addToast, fmt }: {
 }
 
 // ─── Budget Page ──────────────────────────────────────────────────────────────
-function BudgetPage({ dk, expenses, budget, setBudget, addToast, fmt }: {
-  dk:boolean; expenses:Expense[]; budget:Budget; setBudget:(b:Budget)=>void;
+function BudgetPage({ dk, expenses, budget, addToast, fmt, onSaveBudget }: {
+  dk:boolean; expenses:Expense[]; budget:Budget;
   addToast:(m:string,t:"success"|"error")=>void; fmt:(n:number)=>string;
+  onSaveBudget:(amount:number)=>Promise<void>;
 }) {
   const [showEdit, setShowEdit] = useState(false);
   const [val,      setVal]      = useState(budget.amount.toString());
   const [err,      setErr]      = useState("");
   const s = T[dk?"dark":"light"];
-  const spent     = expenses.filter(e=>e.date.startsWith("2024-07")).reduce((s,e)=>s+e.amount,0);
+  const period = currentPeriod();
+  const spent     = expenses.filter(e=>e.date.startsWith(`${period.year}-${String(period.month).padStart(2,"0")}`)).reduce((s,e)=>s+e.amount,0);
   const remaining = budget.amount - spent;
   const pct       = budget.amount>0 ? (spent/budget.amount)*100 : 0;
   const statusColor = pct>=100?"#DC2626":pct>=75?"#EA580C":"#16A34A";
   const r=52; const circ=2*Math.PI*r; const dash=circ*(pct/100); const size=140;
 
-  function saveEdit() {
+  async function saveEdit() {
     if (!val || isNaN(+val) || +val<=0) { setErr("Enter a valid amount"); return; }
-    setBudget({ ...budget, amount:+val });
-    setShowEdit(false); addToast("Budget updated!","success");
+    try {
+      await onSaveBudget(+val);
+      setShowEdit(false); addToast("Budget updated!","success");
+    } catch (error) {
+      console.error("Failed to save budget:", error);
+      addToast("Could not save budget", "error");
+    }
   }
 
   return (
@@ -864,7 +889,7 @@ function BudgetPage({ dk, expenses, budget, setBudget, addToast, fmt }: {
       <div style={{ ...card(dk), padding:28, marginBottom:16 }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:24 }}>
           <div>
-            <p style={{ fontWeight:800, fontSize:18, color:s.text }}>July 2024 Budget</p>
+            <p style={{ fontWeight:800, fontSize:18, color:s.text }}>{budget.month} Budget</p>
             <p style={{ fontSize:12, color:s.sub, marginTop:2 }}>Current month overview</p>
           </div>
           <button onClick={()=>{ setShowEdit(true); setVal(budget.amount.toString()); }} style={btn("#EFF4FF","#2563EB")}>
@@ -940,7 +965,7 @@ function BudgetPage({ dk, expenses, budget, setBudget, addToast, fmt }: {
 
       {showEdit && (
         <Modal dk={dk} title="Edit Budget" onClose={()=>setShowEdit(false)}>
-          <p style={{ fontSize:13, color:s.sub, marginBottom:16 }}>Set your monthly budget for July 2024.</p>
+          <p style={{ fontSize:13, color:s.sub, marginBottom:16 }}>Set your monthly budget for {budget.month}.</p>
           <label style={{ display:"block", fontSize:13, fontWeight:600, color:s.sub, marginBottom:6 }}>Budget Amount (₹)</label>
           <input type="number" value={val} onChange={e=>setVal(e.target.value)} placeholder="e.g. 20000"
             style={{ ...inputStyle(dk), marginBottom:err?4:16 }}/>
@@ -1205,8 +1230,8 @@ export default function App() {
   const [page,     setPage]     = useState<Page>("login");
   const [dk,       setDk]       = useState(false);
   const [currency, setCurrency] = useState("INR (₹)");
-  const [expenses, setExpenses] = useState<Expense[]>(INIT_EXPENSES);
-  const [budget,   setBudget]   = useState<Budget>({ month:"July 2024", amount:20000 });
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [budget,   setBudget]   = useState<Budget>(() => ({ month:currentPeriod().label, amount:20000 }));
   const [mobileOpen,setMobile]  = useState(false);
   const [toast,    setToast]    = useState<{msg:string;type:"success"|"error"}|null>(null);
 
@@ -1248,6 +1273,51 @@ export default function App() {
   };
 
   const fmt = useMemo(() => makeFmt(currency), [currency]);
+
+  useEffect(() => {
+    if (page === "login" || page === "register") return;
+
+    const loadData = async () => {
+      try {
+        const data = await getExpenses();
+        setExpenses(data);
+      } catch (error) {
+        console.error("Failed to load expenses:", error);
+      }
+
+      const period = currentPeriod();
+      try {
+        const data = await getBudget(period.month, period.year);
+        setBudget({ month: period.label, amount: data.amount });
+      } catch (error) {
+        console.error("Failed to load budget:", error);
+      }
+    };
+
+    loadData();
+  }, [page]);
+
+  async function handleAddExpense(expenseData: Omit<Expense,"_id">) {
+    try {
+      const data = await addExpense(expenseData);
+      setExpenses(prev => [data.expense ?? data, ...prev]);
+    } catch (error) {
+      console.error("Failed to add expense:", error);
+      throw error;
+    }
+  }
+
+  async function handleSaveBudget(amount: number) {
+    const period = currentPeriod();
+    try {
+      const data = await createBudget(period.month, period.year, amount);
+      const savedBudget = data.budget ?? data;
+      setBudget({ month: period.label, amount: savedBudget.amount });
+    } catch (error) {
+      console.error("Failed to save budget:", error);
+      throw error;
+    }
+  }
 
   function addToast(msg:string, type:"success"|"error") {
     setToast({ msg, type });
@@ -1293,9 +1363,9 @@ export default function App() {
         <div style={{ flex:1, display:"flex", flexDirection:"column", minWidth:0, overflow:"hidden" }}>
           <Navbar dk={dk} setDk={setDk} page={page} onMenuToggle={()=>setMobile(v=>!v)} onLogout={logout} currency={currency} setCurrency={setCurrency} user={user} onUpdateUser={handleUpdateUser} addToast={addToast}/>
           <div style={{ flex:1, overflowY:"auto" }}>
-            {page==="dashboard" && <DashboardPage dk={dk} expenses={expenses} budget={budget} setBudget={setBudget} setPage={setPage} addToast={addToast} fmt={fmt} user={user}/>}
+            {page==="dashboard" && <DashboardPage dk={dk} expenses={expenses} budget={budget} setBudget={setBudget} setPage={setPage} addToast={addToast} fmt={fmt} onAddExpense={handleAddExpense} user={user}/>}
             {page==="expenses"  && <ExpensesPage  dk={dk} expenses={expenses} setExpenses={setExpenses} addToast={addToast} fmt={fmt}/>}
-            {page==="budget"    && <BudgetPage    dk={dk} expenses={expenses} budget={budget} setBudget={setBudget} addToast={addToast} fmt={fmt}/>}
+            {page==="budget"    && <BudgetPage    dk={dk} expenses={expenses} budget={budget} addToast={addToast} fmt={fmt} onSaveBudget={handleSaveBudget}/>}
             {page==="reports"   && <ReportsPage   dk={dk} expenses={expenses} fmt={fmt}/>}
           </div>
         </div>
