@@ -8,6 +8,7 @@ import {
 import { loginUser, registerUser } from "../services/auth";
 import { addExpense, deleteExpense, getExpenses, updateExpense } from "../services/expenseService";
 import { createBudget, getBudget } from "../services/budgetService";
+import { getDashboardAnalytics } from "../services/analyticsService";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Page = "login" | "register" | "dashboard" | "expenses" | "budget" | "reports";
@@ -55,7 +56,7 @@ function makeFmt(currency: string) {
   const { symbol, locale } = CURRENCY_MAP[currency] ?? CURRENCY_MAP["INR (₹)"];
   return (n: number) => symbol + Math.round(n).toLocaleString(locale);
 }
-const fmtDate = (s: string) => new Date(s + "T00:00:00").toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"});
+const fmtDate = (s: string) => new Date(s.length === 10 ? `${s}T00:00:00` : s).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"});
 const currentPeriod = () => {
   const now = new Date();
   return {
@@ -574,23 +575,34 @@ function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt
   user: UserProfile;
 }) {
   const [showAdd, setShowAdd] = useState(false);
+  const [analytics, setAnalytics] = useState<any>(null);
   const s = T[dk?"dark":"light"];
-  const monthExp = expenses.filter(e=>e.date.startsWith(`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`));
-  const spent    = monthExp.reduce((s,e)=>s+e.amount,0);
-  const remaining = budget.amount - spent;
-  const pct       = budget.amount>0 ? (spent/budget.amount)*100 : 0;
-  const alertColor = pct>=100?"#DC2626":pct>=75?"#EA580C":"#16A34A";
-  const topCat    = (() => {
-    const m: Record<string,number> = {};
-    monthExp.forEach(e=>{ m[e.category]=(m[e.category]||0)+e.amount; });
-    return Object.entries(m).sort((a,b)=>b[1]-a[1])[0]?.[0] ?? "—";
-  })();
-  const catData = (() => {
-    const m: Record<string,number> = {};
-    monthExp.forEach(e=>{ m[e.category]=(m[e.category]||0)+e.amount; });
-    return Object.entries(m).map(([name,value])=>({ name, value, color: CAT_COLOR[name]??"#888" }));
-  })();
-  const recent = [...monthExp].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
+  useEffect(() => {
+    const loadAnalytics = async () => {
+      try {
+        const data = await getDashboardAnalytics();
+        setAnalytics(data);
+      } catch (error) {
+        console.error("Failed to load dashboard analytics:", error);
+      }
+    };
+
+    loadAnalytics();
+  }, []);
+
+  const spent = analytics?.totalSpent ?? 0;
+  const monthlyBudget = analytics?.monthlyBudget ?? 0;
+  const remaining = analytics?.remaining ?? 0;
+  const pct = monthlyBudget > 0 ? (spent / monthlyBudget) * 100 : 0;
+  const budgetExceeded = analytics?.remaining < 0;
+  const alertColor = budgetExceeded || pct>=100 ? "#DC2626" : pct>=75 ? "#EA580C" : "#16A34A";
+  const topCat = analytics?.topCategory ?? "No expenses";
+  const catData: { name:string; value:number; color:string }[] = (analytics?.categoryBreakdown ?? []).map((item: { category:string; amount:number }) => ({
+    name: item.category,
+    value: item.amount,
+    color: CAT_COLOR[item.category] ?? "#888",
+  }));
+  const recent: Expense[] = analytics?.recentExpenses ?? [];
 
   async function handleAdd(data: Omit<Expense,"_id">) {
     try {
@@ -604,10 +616,10 @@ function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt
   }
 
   const summaryCards = [
-    { label:"Total Spent",    value:fmt(spent),        sub:"This month",    icon:<TrendingUp size={18}/>, color:"#2563EB" },
-    { label:"Monthly Budget", value:fmt(budget.amount),sub:budget.month,    icon:<Target size={18}/>,     color:"#16A34A" },
+    { label:"Total Spent",    value:fmt(analytics?.totalSpent ?? 0),        sub:"This month",    icon:<TrendingUp size={18}/>, color:"#2563EB" },
+    { label:"Monthly Budget", value:fmt(analytics?.monthlyBudget ?? 0),sub:budget.month,    icon:<Target size={18}/>,     color:"#16A34A" },
     { label:"Remaining",      value:fmt(Math.max(remaining,0)), sub: remaining<0?"Overspent!":"Left to spend", icon:<Wallet size={18}/>, color: remaining<0?"#DC2626":"#16A34A" },
-    { label:"Top Category",   value:topCat,               sub:fmt(monthExp.filter(e=>e.category===topCat).reduce((s,e)=>s+e.amount,0))+" spent", icon:<Tag size={18}/>, color:"#EA580C" },
+    { label:"Top Category",   value:topCat,               sub:fmt(catData.find((c: { name:string; value:number })=>c.name===topCat)?.value ?? 0)+" spent", icon:<Tag size={18}/>, color:"#EA580C" },
   ];
 
   const firstName = user.name.trim().split(/\s+/)[0] || user.name;
@@ -642,16 +654,16 @@ function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt
       </div>
 
       {/* Budget Alert */}
-      {pct>=75 && (
-        <div style={{ background: pct>=100?"#FEF2F2":"#FFF7ED", border:`1px solid ${pct>=100?"#FECACA":"#FED7AA"}`, borderRadius:14, padding:16, marginBottom:20 }}>
+      {analytics && (analytics.remaining < 0 || pct>=75) && (
+        <div style={{ background: budgetExceeded?"#FEF2F2":"#FFF7ED", border:`1px solid ${budgetExceeded?"#FECACA":"#FED7AA"}`, borderRadius:14, padding:16, marginBottom:20 }}>
           <div style={{ display:"flex", alignItems:"flex-start", gap:10, marginBottom:12 }}>
             <AlertTriangle size={18} color={alertColor} style={{flexShrink:0,marginTop:2}}/>
             <div style={{ flex:1 }}>
-              <p style={{ fontWeight:700, fontSize:14, color:pct>=100?"#991B1B":"#92400E", marginBottom:3 }}>
-                {pct>=100 ? "Budget Exceeded!" : "Approaching Budget Limit"}
+              <p style={{ fontWeight:700, fontSize:14, color:budgetExceeded?"#991B1B":"#92400E", marginBottom:3 }}>
+                {analytics.remaining < 0 ? "Budget Exceeded!" : "Approaching Budget Limit"}
               </p>
-              <p style={{ fontSize:12, color:pct>=100?"#B91C1C":"#B45309" }}>
-                {pct>=100 ? `Overspent by ${fmt(spent-budget.amount)} this month.` : `${pct.toFixed(1)}% used — only ${fmt(budget.amount-spent)} remaining.`}
+              <p style={{ fontSize:12, color:budgetExceeded?"#B91C1C":"#B45309" }}>
+                {analytics.remaining < 0 ? `Overspent by ${fmt(Math.abs(remaining))} this month.` : `${pct.toFixed(1)}% used — only ${fmt(remaining)} remaining.`}
               </p>
             </div>
             <span style={{ fontWeight:800, fontSize:18, color:alertColor }}>{pct.toFixed(0)}%</span>
@@ -673,7 +685,7 @@ function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt
           <div style={{ display:"flex", justifyContent:"center", marginBottom:14 }}>
             <DonutChart data={catData} dk={dk}/>
           </div>
-          {catData.slice(0,4).map(c=>(
+          {catData.slice(0,4).map((c: { name:string; value:number; color:string })=>(
             <div key={c.name} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
               <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                 <span style={{ width:8, height:8, borderRadius:99, background:c.color, flexShrink:0 }}/>
@@ -706,7 +718,7 @@ function DashboardPage({ dk, expenses, budget, setBudget, setPage, addToast, fmt
             </tr>
           </thead>
           <tbody>
-            {recent.map(e=>(
+            {recent.map((e: Expense)=>(
               <tr key={e._id} style={{ borderBottom:`1px solid ${s.border}` }}>
                 <td style={{ padding:"12px 0", fontSize:13, color:s.sub, whiteSpace:"nowrap" }}>{fmtDate(e.date)}</td>
                 <td style={{ padding:"12px 8px", fontSize:13, fontWeight:600, color:s.text }}>{e.title}</td>
@@ -1324,11 +1336,18 @@ export default function App() {
     setTimeout(()=>setToast(null), 3000);
   }
 
-  function logout() {
+  function handleLogout() {
     localStorage.removeItem("token");
     setPage("login");
     setMobile(false);
   }
+
+  useEffect(() => {
+    if (page !== "login" && page !== "register" && !localStorage.getItem("token")) {
+      setPage("login");
+      setMobile(false);
+    }
+  }, [page]);
 
   const s = T[dk?"dark":"light"];
   const authed = page!=="login" && page!=="register";
@@ -1359,9 +1378,9 @@ export default function App() {
         }
       `}</style>
       <div style={{ display:"flex", height:"100vh", overflow:"hidden", background:s.bg }}>
-        <Sidebar dk={dk} page={page} setPage={setPage} onLogout={logout} open={mobileOpen} setOpen={setMobile} user={user}/>
+        <Sidebar dk={dk} page={page} setPage={setPage} onLogout={handleLogout} open={mobileOpen} setOpen={setMobile} user={user}/>
         <div style={{ flex:1, display:"flex", flexDirection:"column", minWidth:0, overflow:"hidden" }}>
-          <Navbar dk={dk} setDk={setDk} page={page} onMenuToggle={()=>setMobile(v=>!v)} onLogout={logout} currency={currency} setCurrency={setCurrency} user={user} onUpdateUser={handleUpdateUser} addToast={addToast}/>
+          <Navbar dk={dk} setDk={setDk} page={page} onMenuToggle={()=>setMobile(v=>!v)} onLogout={handleLogout} currency={currency} setCurrency={setCurrency} user={user} onUpdateUser={handleUpdateUser} addToast={addToast}/>
           <div style={{ flex:1, overflowY:"auto" }}>
             {page==="dashboard" && <DashboardPage dk={dk} expenses={expenses} budget={budget} setBudget={setBudget} setPage={setPage} addToast={addToast} fmt={fmt} onAddExpense={handleAddExpense} user={user}/>}
             {page==="expenses"  && <ExpensesPage  dk={dk} expenses={expenses} setExpenses={setExpenses} addToast={addToast} fmt={fmt}/>}
